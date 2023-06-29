@@ -1,0 +1,104 @@
+#!/bin/sh
+
+
+#########################################################################################
+# Author: [Khurram Nawaz]
+# Description: [F5 backup and delete older files defined in "DAYS" variable]
+# Date: [06/27/2023]
+# Version: [2.0]
+# Website: [khurram.jn@gmail.com]
+# 
+# This script performs a backup operation by finding and deleting  files older than a 
+# certain number of days in a specified directory. Additionally, it creates a backup file 
+# and transfers it to a remote host using TFTP.
+#
+# DISCLAIMER:
+# This script is provided as-is, without any warranties or guarantees of any kind.
+# Use this code at your own risk. The author shall not be held liable for any damages
+# or consequences arising from the use of this script.
+# 
+# WARNING:
+# Although this code has been thoroughly tested before upload, it is still recommended
+# to review and test it in your specific environment before deploying it in production.
+# 
+# Feel free to use and modify this script according to your needs. Enjoy!
+#########################################################################################
+
+
+set -o errexit
+
+# Log file paths
+readonly LOG_FILE="/var/log/.log"
+readonly LOG_CURRENT_FILES="/var/log/.out"
+
+# Create log files
+sudo touch $LOG_FILE $LOG_CURRENT_FILES
+
+# Get current timestamp
+LOG_TIMESTAMP=$(date)
+
+# Redirect stdout and stderr to the log file
+exec >> ${LOG_FILE}
+exec 2>&1
+
+# Log the start of the script
+echo "Backup:: Script Start -- ${LOG_TIMESTAMP}"
+
+# Directory and file settings
+CURRENT_DIR="/var/local/ucs"
+CURRENT_COUNT=0
+DAYS=2
+FIND_NAME="*.ucs"
+REMOTE_HOST="1.1.1.1"
+TIMESTAMP="$(/bin/hostname)$(date +%m%d%Y)"
+
+# Repeat a string 'n' times
+repeat () {
+  for i in {1..90}; do
+    echo -n "$1"
+  done
+}
+
+# Find files older than 'DAYS' in the 'CURRENT_DIR' directory
+# and save the results to the 'LOG_CURRENT_FILES' file
+get_x_days_files() {
+  repeat "-"
+  echo
+
+  find "$CURRENT_DIR" -type f -name "${FIND_NAME}" -mtime +${DAYS} -exec ls -ltrd {} \; > "$LOG_CURRENT_FILES"
+
+  COUNT=$(cat /var/log/.out | wc -l)
+
+  if [ "$COUNT" -gt "$CURRENT_COUNT" ]; then
+    repeat "-"
+    echo
+    echo "$(date) Files to be deleted: $COUNT"
+    find "$CURRENT_DIR" -type f -name "${FIND_NAME}" -mtime +${DAYS} -exec rm -rvf {} \;
+  else
+    echo "$(date) No Files to be deleted: $COUNT"
+  fi
+}
+
+# Create a UCS backup file and transfer it to the remote host
+get_latest_backup_file() {
+  tmsh save /sys ucs /var/local/ucs/"${TIMESTAMP}".ucs
+
+  repeat "-"
+  echo
+
+  FILE=$(ls -Art1 ${CURRENT_DIR} | tail -n 1)
+
+  if [ -z "${FILE}" ]; then
+    echo "Backup file not found!"
+    exit 1
+  else
+    cd "${CURRENT_DIR}" && tftp -v "${REMOTE_HOST}" -c put "$FILE"
+  fi
+
+  echo "$FILE"
+  exit
+}
+
+# Execute the functions
+get_x_days_files
+get_latest_backup_file
